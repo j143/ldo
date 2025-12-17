@@ -1,17 +1,14 @@
 // Pyodide worker to run LDO simulations in-browser.
 // Loads Pyodide, defines a lightweight Python model, and handles messages from the UI.
 
+let pyodide = null;
 let pyodideReadyPromise = null;
+let pyodideInitialized = false;
 
-async function initPyodide() {
-  if (pyodideReadyPromise) return pyodideReadyPromise;
-  pyodideReadyPromise = new Promise(async (resolve, reject) => {
-    try {
-      self.postMessage({ type: 'status', message: 'loading-pyodide' });
-      importScripts('https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js');
-      const pyodide = await loadPyodide({ indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/' });
+console.log('[LDO Worker] Starting...');
 
-      const pythonCode = `
+
+const pythonCode = `
 import math, random
 
 def run_sim(params):
@@ -52,7 +49,6 @@ def run_sim(params):
 
         bode.append({'freq': f, 'mag': mag, 'phase': phase if phase >= 0 else phase + 360})
 
-    # Transient response (damped second order)
     transient = []
     damping = phase_margin / 100.0 if phase_margin > 0 else 0.5
     wn = (cross_over * 2 * math.pi) if cross_over > 0 else 2 * math.pi * 1e5
@@ -111,29 +107,94 @@ def run_sim(params):
             'pass': bool(pass_flag),
         }
     }
-      `;
+`;
 
+async function initPyodide() {
+  if (pyodideReadyPromise) return pyodideReadyPromise;
+  
+  pyodideReadyPromise = (async () => {
+    try {
+      console.log('[LDO Worker] Starting Pyodide init...');
+      self.postMessage({ type: 'status', message: 'loading-pyodide' });
+      
+      // Load Pyodide using fetch + eval (most reliable for Web Workers)
+      console.log('[LDO Worker] Fetching Pyodide from CDN...');
+      const pyodideUrl = 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js';
+      const response = await fetch(pyodideUrl);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to fetch Pyodide: ${response.status} ${response.statusText}`);
+      }
+      
+      const scriptText = await response.text();
+      console.log(`[LDO Worker] Pyodide fetched (${scriptText.length} bytes), evaluating...`);
+      
+      // Evaluate the script in worker context to define loadPyodide()
+      eval(scriptText);
+      console.log('[LDO Worker] eval() complete');
+      
+      // Verify loadPyodide is available
+      if (typeof loadPyodide !== 'function') {
+        throw new Error('loadPyodide function not available after eval()');
+      }
+      
+      console.log('[LDO Worker] loadPyodide() function available, initializing...');
+      pyodide = await loadPyodide({ 
+        indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.25.0/full/' 
+      });
+      console.log('[LDO Worker] Pyodide instance created');
+      
+      // Run Python code to define the simulation function
+      console.log('[LDO Worker] Running Python code to define run_sim()...');
       await pyodide.runPythonAsync(pythonCode);
-      self.pyodide = pyodide;
+      console.log('[LDO Worker] Python simulation function ready');
+      
+      pyodideInitialized = true;
       self.postMessage({ type: 'ready' });
-      resolve(pyodide);
+      console.log('[LDO Worker] Ready!');
+      return pyodide;
     } catch (err) {
-      self.postMessage({ type: 'error', error: err?.message || String(err) });
-      reject(err);
+      const errorMsg = err?.message || String(err);
+      console.error('[LDO Worker] Pyodide init FAILED:', errorMsg);
+      console.error('[LDO Worker] Stack:', err?.stack);
+      self.postMessage({ type: 'error', error: `Pyodide init failed: ${errorMsg}` });
+      throw err;
     }
-  });
+  })();
+  
   return pyodideReadyPromise;
 }
 
+
 self.onmessage = async (event) => {
   const { type, payload } = event.data || {};
+  console.log('[LDO Worker] Message received:', type);
+  
   if (type === 'simulate') {
     try {
-      const pyodide = await initPyodide();
-      const result = await pyodide.runPythonAsync(`run_sim(${JSON.stringify(payload)})`);
-      self.postMessage({ type: 'result', result });
+      console.log('[LDO Worker] Waiting for Pyodide...');
+      const py = await initPyodide();
+      console.log('[LDO Worker] Pyodide ready, executing Python simulation...');
+      
+      // Call the Python function with the params object
+      const paramsJson = JSON.stringify(payload);
+      console.log('[LDO Worker] Params:', paramsJson);
+      const result = await py.runPythonAsync(
+        `import json; json.dumps(run_sim(${paramsJson}))`
+      );
+      
+      console.log('[LDO Worker] Python returned result, parsing...');
+      const parsed = JSON.parse(result);
+      console.log('[LDO Worker] Parse successful, sending to main thread');
+      console.log('[LDO Worker] Result keys:', Object.keys(parsed));
+      
+      self.postMessage({ type: 'result', result: parsed });
     } catch (err) {
-      self.postMessage({ type: 'error', error: err?.message || String(err) });
+      const errorMsg = err?.message || String(err);
+      console.error('[LDO Worker] Simulation FAILED:', errorMsg);
+      console.error('[LDO Worker] Stack:', err?.stack);
+      self.postMessage({ type: 'error', error: errorMsg });
     }
   }
 };
+
