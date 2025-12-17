@@ -55,3 +55,47 @@ class PMOSDriver:
         self.turbo_enabled = False
         self.ron /= 0.85  # Restore
         return {"mode": "normal"}
+
+class CircuitSimulator:
+    """High-level circuit simulator API compatible with day2 script.
+
+    Provides transient step response in terms of rise time and overshoot.
+    """
+
+    def __init__(self, vin: float = 0.80, vout_nom: float = 0.75, load_ia_max_ma: float = 500.0):
+        # Map inputs to underlying LDOParams
+        params = LDOParams(
+            vin=vin,
+            vout_target=vout_nom,
+            max_load=load_ia_max_ma / 1000.0  # convert mA to A-equivalent scale
+        )
+        self._params = params
+        self._sim = TransientSimulator(params)
+
+    def transient_step_response(self, step_time_us: float = 0.1, step_size_us: float = 0.001):
+        """Run a transient step response and summarize metrics.
+
+        Args:
+            step_time_us: Total simulation time in microseconds
+            step_size_us: Step granularity (unused in simplified model)
+
+        Returns:
+            Dict containing rise time in microseconds and overshoot in mV.
+        """
+        # Convert time to ns for underlying simulator
+        time_ns = int(step_time_us * 1000)
+        load_step_ma = int(min(100.0, self._params.max_load * 1000.0))
+        result = self._sim.simulate_load_step(load_step_ma=load_step_ma, time_ns=time_ns)
+
+        # Estimate rise time (convert settling ns to us)
+        tr_us = result.get("settling_time_ns", 0) / 1000.0
+        # Approximate overshoot as 10% of peak droop for this simplified model
+        overshoot_mv = 0.1 * float(result.get("peak_droop_mv", 0.0))
+
+        return {
+            "tr_us": float(tr_us),
+            "overshoot_mv": float(overshoot_mv),
+            # Include waveform for optional downstream visualization
+            "waveform_time_ns": result.get("time_ns", []),
+            "waveform_droop_mv": result.get("droop_mv", []),
+        }

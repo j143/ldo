@@ -4,6 +4,11 @@
 Characterize LDO DC/AC performance across PVT corners.
 Measure PSRR, output impedance, noise, transient response.
 """
+import os
+import sys
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 from src.pvt_corner_analysis import PVTAnalysis
 from src.em_checker import EMChecker
 

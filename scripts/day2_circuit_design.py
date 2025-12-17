@@ -5,6 +5,13 @@ Design and simulate LDO circuit. Run transient analysis across PVT corners.
 Deliverables: Schematic, netlist, simulation results for startup and load transient.
 """
 
+# Ensure repo root is on sys.path for imports when running directly
+import os
+import sys
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
 from src.circuit_simulator import CircuitSimulator
 from src.pvt_corner_analysis import PVTAnalysis
 import json

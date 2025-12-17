@@ -3,6 +3,11 @@
 
 Final simulations, checks, and handoff to foundry for manufacturing.
 """
+import os
+import sys
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 from src.pvt_corner_analysis import PVTAnalysis
 
 def run_day5_verification():

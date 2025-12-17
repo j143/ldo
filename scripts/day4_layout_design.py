@@ -3,6 +3,11 @@
 
 Floorplan, routing, DRC/LVS verification. EM checks and reliability analysis.
 """
+import os
+import sys
+_repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 from src.em_checker import EMChecker
 from src.layout_effects import LayoutAnalyzer
 
